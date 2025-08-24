@@ -1,86 +1,92 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { VideoOptions, ImageFile } from '../types';
 
-if (!process.env.API_KEY) {
-  throw new Error("AIzaSyBnJIfHXhD05bdQPuVjjNEbrdjN2jpGZIU");
-}
+const VEO_MODEL = 'veo-2.0-generate-001';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
+// Helper to wait for a specified time
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export const generateVideo = async (
-  prompt: string,
-  imageFile: ImageFile | null,
-  options: VideoOptions,
-  onProgress: (message: string) => void
+// Reassuring messages for the user during the generation process
+const loadingMessages = [
+    "Warming up the digital director...",
+    "Choreographing pixels into motion...",
+    "Rendering your vision, frame by frame...",
+    "This can take a few minutes, good things come to those who wait!",
+    "Polishing the final cut...",
+    "Almost ready for the premiere..."
+];
+
+export const generateVideoFromApi = async (
+    apiKey: string,
+    prompt: string,
+    imageB64?: string,
+    setStatus?: (message: string) => void
 ): Promise<string> => {
-  onProgress('Initializing video generation...');
-
-  const generationConfig: {
-    numberOfVideos: number;
-    aspectRatio?: '16:9' | '9:16';
-    withSound?: boolean;
-    resolution?: '720p' | '1080p';
-  } = {
-    numberOfVideos: 1,
-    aspectRatio: options.aspectRatio,
-    withSound: options.enableSound,
-    resolution: options.resolution,
-  };
-
-  const generateParams: {
-    model: string;
-    prompt: string;
-    image?: { imageBytes: string; mimeType: string };
-    config: typeof generationConfig;
-  } = {
-    model: 'veo-3.0-generate-preview',
-    prompt: prompt,
-    config: generationConfig,
-  };
-
-  if (imageFile) {
-    generateParams.image = {
-      imageBytes: imageFile.base64,
-      mimeType: imageFile.mimeType,
-    };
-  }
-
-  let operation = await ai.models.generateVideos(generateParams);
-  onProgress('Video generation started. This may take a few minutes.');
-
-  while (!operation.done) {
-    await wait(10000); // Poll every 10 seconds
-    onProgress('Still processing... Your video is being crafted.');
-    try {
-        operation = await ai.operations.getVideosOperation({ operation: operation });
-    } catch (error) {
-        console.error("Error polling for video status:", error);
-        throw new Error("Failed to get video generation status.");
+    if (!apiKey) {
+        throw new Error("API Key is not configured.");
     }
-  }
+    const ai = new GoogleGenAI({ apiKey });
 
-  onProgress('Finalizing video...');
+    setStatus?.("Sending request to VEO model...");
 
-  if (!operation.response?.generatedVideos?.[0]?.video?.uri) {
-    console.error('API Error:', operation);
-    throw new Error('Video generation failed or returned no video URI.');
-  }
+    const generateVideosParams: any = {
+        model: 'veo-3.0-generate-preview',
+        prompt: prompt,
+        config: {
+            numberOfVideos: 1,
+            // Hidden defaults as per request
+            // Aspect ratio is not a direct parameter in the library, 
+            // model might infer or have a default. 16:9 is common.
+            // Resolution and sound are also model-dependent.
+        }
+    };
+    
+    if (imageB64) {
+        generateVideosParams.image = {
+            imageBytes: imageB64,
+            mimeType: 'image/png' // Assuming PNG, can be made dynamic
+        };
+    }
 
-  const downloadLink = operation.response.generatedVideos[0].video.uri;
-  
-  onProgress('Downloading video data...');
+    let operation = await ai.models.generateVideos(generateVideosParams);
+    
+    let messageIndex = 0;
+    const updateStatusWithLoopingMessage = () => {
+        setStatus?.(loadingMessages[messageIndex]);
+        messageIndex = (messageIndex + 1) % loadingMessages.length;
+    };
+    
+    updateStatusWithLoopingMessage();
+    const intervalId = setInterval(updateStatusWithLoopingMessage, 8000);
 
-  const videoResponse = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
-  if (!videoResponse.ok) {
-    throw new Error(`Failed to download video file. Status: ${videoResponse.statusText}`);
-  }
+    while (!operation.done) {
+        await wait(10000); // Poll every 10 seconds
+        operation = await ai.operations.getVideosOperation({ operation: operation });
+    }
 
-  const videoBlob = await videoResponse.blob();
-  const videoUrl = URL.createObjectURL(videoBlob);
+    clearInterval(intervalId);
 
-  onProgress('Generation complete!');
-  return videoUrl;
+    if (operation.error) {
+        throw new Error(`Video generation failed with error: ${operation.error.message}`);
+    }
+
+    const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+
+    if (!downloadLink) {
+        throw new Error("Video generation completed, but no download link was found.");
+    }
+
+    setStatus?.("Downloading generated video...");
+    const response = await fetch(`${downloadLink}&key=${apiKey}`);
+
+    if (!response.ok) {
+        throw new Error(`Failed to download video. Status: ${response.statusText}`);
+    }
+    
+    setStatus?.("Finalizing video...");
+    const videoBlob = await response.blob();
+    const videoUrl = URL.createObjectURL(videoBlob);
+    
+    setStatus?.("Video ready!");
+    return videoUrl;
 };

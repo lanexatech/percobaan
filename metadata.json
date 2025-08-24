@@ -1,5 +1,5 @@
 {
-  "name": "VEO-3 Video Generator",
-  "description": "A web application to generate high-quality videos from text prompts and reference images using Google's latest VEO model. Features options for aspect ratio, sound, and resolution with a sleek liquid glass UI.",
+  "name": "VEO3 Video Generator",
+  "description": "A web application to generate high-quality videos from text prompts and reference images using Google's VEO3 model. Features a liquid glass UI, API key management, and a gallery of generated videos.",
   "requestFramePermissions": []
 }
