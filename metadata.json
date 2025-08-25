@@ -1,5 +1,5 @@
 {
-  "name": "VEO3 Video Generator",
-  "description": "A web application to generate high-quality videos from text prompts and reference images using Google's VEO3 model. Features a liquid glass UI, API key management, and a gallery of generated videos.",
+  "name": "VEO Video Generator - Barbara Edition",
+  "description": "A professional VEO video generator application with a UI/UX inspired by Barbara from Genshin Impact. It allows users to generate videos from text prompts and reference images, manage API keys, and view generation history.",
   "requestFramePermissions": []
 }

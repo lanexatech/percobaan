@@ -1,15 +1,19 @@
 
 import React from 'react';
+import { MusicNoteIcon } from './icons/MusicNoteIcon';
 
 const Header: React.FC = () => {
   return (
-    <header className="text-center mb-8">
-      <h1 className="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-500 to-purple-500 pb-2">
-        VEO-3 Video Generator
-      </h1>
-      <p className="text-slate-600 text-lg">
-        Bring your ideas to life with AI-powered video creation.
-      </p>
+    <header className="text-center p-4 rounded-lg bg-white/60 shadow-md backdrop-blur-sm">
+      <div className="flex items-center justify-center gap-4">
+        <div className="text-amber-400">
+            <MusicNoteIcon />
+        </div>
+        <h1 className="text-3xl sm:text-4xl font-bold text-sky-700 tracking-tight">
+          VEO Video Generator
+        </h1>
+      </div>
+      <p className="mt-2 text-lg text-slate-600">Barbara Edition ✨</p>
     </header>
   );
 };
