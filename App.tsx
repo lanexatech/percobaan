@@ -1,198 +1,263 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useLocalStorage } from './hooks/useLocalStorage';
-import type { Settings, HistoryItem, ApiError } from './types';
-import { generateVideo, fetchVideoBlob, generateStoryboardPrompts } from './services/geminiService';
-import Header from './components/Header';
-import ControlsPanel from './components/ControlsPanel';
-import VideoDisplay from './components/VideoDisplay';
-import HistoryPanel from './components/HistoryPanel';
-import ApiKeyModal from './components/ApiKeyModal';
-import { HistoryIcon } from './components/icons/HistoryIcon';
+
+import React, { useState, useCallback, useEffect } from 'react';
+import { Header } from './components/Header';
+import { VideoGeneratorForm } from './components/VideoGeneratorForm';
+import { VideoPreview } from './components/VideoPreview';
+import { VideoHistory } from './components/VideoHistory';
+import { VideoPlayerModal } from './components/VideoPlayerModal';
+import { VideoSettings } from './components/VideoSettings';
+import { ApiKeyManager } from './components/ApiKeyManager';
+import { generateVideo } from './services/geminiService';
+import type { GeneratedVideo, GenerationSettings } from './types';
 
 const App: React.FC = () => {
-  const [apiKey, setApiKey] = useLocalStorage<string | null>('gemini-api-key', null);
-  const [showApiKeyModal, setShowApiKeyModal] = useState<boolean>(!apiKey);
-  const [settings, setSettings] = useState<Settings>({
-    prompts: ['', '', ''],
-    image: null,
-    aspectRatio: '16:9',
-    sound: true,
-    resolution: '1080p',
-  });
-  const [isGenerating, setIsGenerating] = useState<boolean>(false);
-  const [isGeneratingPrompts, setIsGeneratingPrompts] = useState<boolean>(false);
-  const [generationStatus, setGenerationStatus] = useState<string>('');
-  const [error, setError] = useState<string | null>(null);
-  const [currentVideo, setCurrentVideo] = useState<HistoryItem | null>(null);
-  const [history, setHistory] = useLocalStorage<HistoryItem[]>('video-history', []);
-  const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState<boolean>(false);
+    const [apiKey, setApiKey] = useState<string>('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [loadingMessage, setLoadingMessage] = useState("Summoning spirits to generate your video...");
+    const [currentVideo, setCurrentVideo] = useState<GeneratedVideo | null>(null);
+    const [videoHistory, setVideoHistory] = useState<GeneratedVideo[]>([]);
+    const [modalVideo, setModalVideo] = useState<GeneratedVideo | null>(null);
+    const [referenceImage, setReferenceImage] = useState<{ file: File; preview: string; base64Data: string; } | null>(null);
 
-  useEffect(() => {
-    if (!apiKey) {
-      setShowApiKeyModal(true);
-    } else {
-      setShowApiKeyModal(false);
-    }
-  }, [apiKey]);
+    const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('16:9');
+    const [enableSound, setEnableSound] = useState(true);
+    const [resolution, setResolution] = useState<'720p' | '1080p'>('1080p');
 
-  const handleApiKeySubmit = (newKey: string) => {
-    setApiKey(newKey);
-    setShowApiKeyModal(false);
-    setError(null);
-  };
-
-  const handleGeneratePromptsFromIdea = async (idea: string) => {
-    if (!apiKey) {
-        setError('An API key is required to generate prompt ideas.');
-        setShowApiKeyModal(true);
-        return;
-    }
-    if (!idea.trim()) {
-        setError('Please enter an idea to generate prompts.');
-        return;
-    }
-
-    setIsGeneratingPrompts(true);
-    setError(null);
-
-    try {
-        const newPrompts = await generateStoryboardPrompts(apiKey, idea);
-        setSettings(s => ({ ...s, prompts: newPrompts }));
-    } catch (err) {
-        const apiError = err as ApiError;
-        let errorMessage = 'Failed to generate prompts from idea.';
-        if (apiError.message) {
-            errorMessage = apiError.message;
+    useEffect(() => {
+        const storedKey = localStorage.getItem('user_api_key');
+        if (storedKey) {
+            setApiKey(storedKey);
         }
-        if (apiError.status === 400 || apiError.status === 403 || apiError.status === 429) {
-            errorMessage = `API Error: ${apiError.message}. Your API key might be invalid or have exceeded its quota.`;
-            setShowApiKeyModal(true);
+    }, []);
+
+    const handleSaveApiKey = (key: string) => {
+        if (key) {
+            localStorage.setItem('user_api_key', key);
+            setApiKey(key);
         }
-        setError(errorMessage);
-        console.error(err);
-    } finally {
-        setIsGeneratingPrompts(false);
-    }
-  };
+    };
 
-  const handleGenerate = useCallback(async () => {
-    if (!apiKey || settings.prompts.some(p => p.trim() === '')) {
-      setError('API Key and all three prompt scenes are required to generate a storyboard.');
-      if (!apiKey) setShowApiKeyModal(true);
-      return;
-    }
+    const captureFrame = useCallback((videoUrl: string, time: number): Promise<{ file: File; base64Data: string; preview: string }> => {
+        return new Promise((resolve, reject) => {
+            const video = document.createElement('video');
+            video.muted = true;
+            video.playsInline = true;
+            video.crossOrigin = "anonymous";
+            video.src = videoUrl;
+            
+            let seekedFired = false;
 
-    setIsGenerating(true);
-    setError(null);
-    setCurrentVideo(null);
-    setGenerationStatus('Initializing storyboard generation...');
+            const cleanup = () => {
+                video.removeEventListener('seeked', onSeeked);
+                video.removeEventListener('error', onError);
+                video.removeEventListener('loadedmetadata', onLoadedMetadata);
+                video.src = ''; 
+            }
 
-    try {
-      const onProgress = (status: string) => setGenerationStatus(status);
-      const downloadLinks = await generateVideo(apiKey, settings, onProgress);
+            const onSeeked = () => {
+                if (seekedFired) return;
+                seekedFired = true;
 
-      onProgress('Fetching generated videos...');
-      const videoBlobs = await Promise.all(
-          downloadLinks.map(link => fetchVideoBlob(link, apiKey))
-      );
-      const videoUrls = videoBlobs.map(blob => URL.createObjectURL(blob));
-      
-      const newVideo: HistoryItem = {
-        id: Date.now().toString(),
-        prompts: settings.prompts,
-        videoUrls,
-        downloadLinks,
-        timestamp: new Date().toISOString(),
-      };
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) {
+                        cleanup();
+                        return reject(new Error('Could not get canvas context'));
+                    }
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    
+                    const previewUrl = canvas.toDataURL('image/jpeg', 0.9);
+                    const base64Data = previewUrl.split(',')[1];
 
-      setCurrentVideo(newVideo);
-      setHistory(prev => [newVideo, ...prev.slice(0, 19)]); // Keep history to 20 items
-    } catch (err) {
-        const apiError = err as ApiError;
-        let errorMessage = 'An unexpected error occurred.';
-        if (apiError.message) {
-            errorMessage = apiError.message;
+                    canvas.toBlob((blob) => {
+                        if (!blob) {
+                            cleanup();
+                            return reject(new Error('Failed to create blob from canvas'));
+                        }
+                        const file = new File([blob], `frame_at_${time}s.jpg`, { type: 'image/jpeg' });
+                        
+                        cleanup();
+                        resolve({
+                            file,
+                            base64Data,
+                            preview: previewUrl,
+                        });
+                    }, 'image/jpeg', 0.9);
+
+                } catch (e) {
+                    cleanup();
+                    reject(e);
+                }
+            };
+            
+            const onError = (e: Event | string) => {
+                cleanup();
+                reject(new Error(`Video error: ${e instanceof Event ? (e.target as HTMLVideoElement).error?.message : e}`));
+            };
+
+            const onLoadedMetadata = () => {
+                 if (video.duration < time) {
+                     cleanup();
+                     reject(new Error(`Video is shorter than ${time}s. Cannot capture frame.`));
+                     return;
+                 }
+                 video.currentTime = time;
+            };
+
+
+            video.addEventListener('loadedmetadata', onLoadedMetadata);
+            video.addEventListener('seeked', onSeeked);
+            video.addEventListener('error', onError);
+            
+            video.load();
+        });
+    }, []);
+
+    const handleGenerateVideo = useCallback(async (coreSettings: Pick<GenerationSettings, 'prompt' | 'image'>) => {
+        if (!apiKey) {
+            alert("Aiya! You need to set your API Key before generating a video.");
+            return;
         }
-        if (apiError.status === 400 || apiError.status === 403 || apiError.status === 429) {
-            errorMessage = `API Error: ${apiError.message}. Your API key might be invalid or have exceeded its quota.`;
-            setShowApiKeyModal(true);
+
+        setIsLoading(true);
+        setCurrentVideo(null);
+        if (referenceImage && referenceImage.preview.startsWith('blob:')) {
+            URL.revokeObjectURL(referenceImage.preview);
         }
-        setError(errorMessage);
-        console.error(err);
-    } finally {
-      setIsGenerating(false);
-      setGenerationStatus('');
-    }
-  }, [apiKey, settings, setHistory]);
-  
-  const handleSelectHistoryItem = async (item: HistoryItem) => {
-      if (!apiKey) {
-        setError("An API key is required to view historical videos.");
-        setShowApiKeyModal(true);
-        return;
-      }
-      try {
-        const videoBlobs = await Promise.all(
-          item.downloadLinks.map(link => fetchVideoBlob(link, apiKey))
-        );
-        const freshVideoUrls = videoBlobs.map(blob => URL.createObjectURL(blob));
+        setReferenceImage(null); // Clear old image at start of new generation
 
-        setCurrentVideo({ ...item, videoUrls: freshVideoUrls });
-        setIsHistoryPanelOpen(false);
-      } catch (err) {
-        setError("Could not retrieve the videos. The links may have expired or the API key is invalid.");
-        setShowApiKeyModal(true);
-      }
-  };
+        const loadingMessages = [
+            "Consulting the spirits...",
+            "Crossing the veil...",
+            "Capturing ethereal moments...",
+            "Wandering the spirit realm...",
+            "Almost back from the beyond...",
+        ];
+        
+        let messageIndex = 0;
+        const intervalId = setInterval(() => {
+            messageIndex = (messageIndex + 1) % loadingMessages.length;
+            setLoadingMessage(loadingMessages[messageIndex]);
+        }, 8000);
 
+        const settings: GenerationSettings = {
+            ...coreSettings,
+            aspectRatio,
+            enableSound,
+            resolution,
+        };
 
-  return (
-    <div className="min-h-screen bg-sky-100/50 flex flex-col items-center p-4 sm:p-6 lg:p-8 font-sans">
-      <div className="w-full max-w-screen-2xl mx-auto">
-        <Header />
-        <main className="grid grid-cols-1 lg:grid-cols-12 gap-8 mt-6">
-          <div className="lg:col-span-4">
-            <ControlsPanel
-              settings={settings}
-              setSettings={setSettings}
-              onGenerate={handleGenerate}
-              isGenerating={isGenerating}
-              onGeneratePrompts={handleGeneratePromptsFromIdea}
-              isGeneratingPrompts={isGeneratingPrompts}
-            />
-          </div>
-          <div className="lg:col-span-8">
-            <VideoDisplay
-              videoItem={currentVideo}
-              isGenerating={isGenerating}
-              status={generationStatus}
-              error={error}
-            />
-          </div>
-        </main>
-        <footer className="text-center mt-12 text-slate-500 text-sm">
-          @2025 VEO Video Generator by LANEXA
-        </footer>
-      </div>
+        try {
+            const videoUrl = await generateVideo(settings, apiKey);
+            let newVideo: GeneratedVideo;
 
-      <button
-        onClick={() => setIsHistoryPanelOpen(true)}
-        className="fixed bottom-6 right-6 bg-amber-400 text-white p-4 rounded-full shadow-lg hover:bg-amber-500 transition-transform transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"
-        aria-label="Open video history"
-      >
-        <HistoryIcon />
-      </button>
+            try {
+                const frameData = await captureFrame(videoUrl, 8);
+                newVideo = {
+                    id: `vid_${Date.now()}`,
+                    url: videoUrl,
+                    prompt: settings.prompt,
+                    settings: settings,
+                    thumbnail: frameData,
+                };
+                setReferenceImage(frameData);
+            } catch (frameError) {
+                 newVideo = {
+                    id: `vid_${Date.now()}`,
+                    url: videoUrl,
+                    prompt: settings.prompt,
+                    settings: settings,
+                };
+                console.error("Could not capture frame from video:", frameError);
+            }
 
-      <HistoryPanel
-        isOpen={isHistoryPanelOpen}
-        onClose={() => setIsHistoryPanelOpen(false)}
-        history={history}
-        onSelect={handleSelectHistoryItem}
-      />
+            setCurrentVideo(newVideo);
+            setVideoHistory(prev => [newVideo, ...prev]);
 
-      {showApiKeyModal && <ApiKeyModal onSubmit={handleApiKeySubmit} />}
-    </div>
-  );
+        } catch (error) {
+            console.error("Video generation failed:", error);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            alert(`An error occurred during video generation: ${errorMessage}\n\nPlease check your API key and try again.`);
+            
+            // Clear the invalid API key to re-prompt the user
+            setApiKey('');
+            localStorage.removeItem('user_api_key');
+
+        } finally {
+            setIsLoading(false);
+            clearInterval(intervalId);
+            setLoadingMessage("Summoning spirits to generate your video...");
+        }
+    }, [captureFrame, referenceImage, aspectRatio, enableSound, resolution, apiKey]);
+
+    const handlePlayVideo = useCallback((video: GeneratedVideo) => {
+        setModalVideo(video);
+    }, []);
+
+    const handleCloseModal = useCallback(() => {
+        setModalVideo(null);
+    }, []);
+
+    const handleHistoryThumbnailClick = useCallback((video: GeneratedVideo) => {
+        if (video.thumbnail) {
+            setReferenceImage(video.thumbnail);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    }, []);
+
+    const isAppDisabled = isLoading || !apiKey;
+
+    return (
+        <div className="min-h-screen bg-gradient-to-br from-[#1a1111] via-black to-[#2d0f10] bg-fixed p-4 sm:p-6 lg:p-8">
+            <div className="max-w-7xl mx-auto">
+                <Header />
+                <main className="mt-8">
+                    {!apiKey && (
+                         <div className="mb-8">
+                            <ApiKeyManager onSave={handleSaveApiKey} />
+                        </div>
+                    )}
+                    <div className={`grid grid-cols-1 lg:grid-cols-12 gap-8 items-start transition-opacity duration-500 ${!apiKey ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
+                        <div className="lg:col-span-3">
+                            <VideoGeneratorForm 
+                                onGenerate={handleGenerateVideo} 
+                                isLoading={isAppDisabled} 
+                                referenceImage={referenceImage}
+                                setReferenceImage={setReferenceImage}
+                            />
+                        </div>
+                        <div className="lg:col-span-6">
+                           <VideoPreview 
+                                video={currentVideo} 
+                                isLoading={isLoading} 
+                                loadingMessage={loadingMessage} 
+                            />
+                            <VideoSettings
+                                aspectRatio={aspectRatio}
+                                setAspectRatio={setAspectRatio}
+                                enableSound={enableSound}
+                                setEnableSound={setEnableSound}
+                                resolution={resolution}
+                                setResolution={setResolution}
+                                isLoading={isAppDisabled}
+                            />
+                        </div>
+                        <div className="lg:col-span-3">
+                            <VideoHistory 
+                                history={videoHistory} 
+                                onPlay={handlePlayVideo} 
+                                onThumbnailClick={handleHistoryThumbnailClick}
+                            />
+                        </div>
+                    </div>
+                </main>
+            </div>
+            {modalVideo && <VideoPlayerModal video={modalVideo} onClose={handleCloseModal} />}
+        </div>
+    );
 };
 
 export default App;

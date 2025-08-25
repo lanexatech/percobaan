@@ -1,5 +1,5 @@
 {
-  "name": "VEO Video Generator - Barbara Edition",
-  "description": "A professional VEO video generator application with a UI/UX inspired by Barbara from Genshin Impact. It allows users to generate videos from text prompts and reference images, manage API keys, and view generation history.",
+  "name": "Hu Tao's VEO-3 Video Generator",
+  "description": "A video generation web application powered by Google's VEO-3 model, featuring a UI/UX inspired by Hu Tao from Genshin Impact. Users can generate videos from text prompts, upload reference images, and customize settings like aspect ratio.",
   "requestFramePermissions": []
 }

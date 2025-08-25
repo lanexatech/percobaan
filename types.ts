@@ -1,24 +1,23 @@
 
-export interface Settings {
-  prompts: [string, string, string];
-  image: {
-    base64: string;
-    mimeType: string;
-    name: string;
-  } | null;
-  aspectRatio: '16:9' | '9:16';
-  sound: boolean; // Note: UI only, VEO API doesn't have this param yet
-  resolution: '720p' | '1080p'; // Note: UI only, VEO API doesn't have this param yet
+export interface GenerationSettings {
+    prompt: string;
+    image: {
+        file: File;
+        base64: string;
+    } | null;
+    aspectRatio: '16:9' | '9:16';
+    enableSound: boolean;
+    resolution: '720p' | '1080p';
 }
 
-export interface HistoryItem {
-  id: string;
-  prompts: [string, string, string];
-  videoUrls: string[];
-  downloadLinks: string[];
-  timestamp: string;
-}
-
-export interface ApiError extends Error {
-    status?: number;
+export interface GeneratedVideo {
+    id: string;
+    url: string;
+    prompt: string;
+    settings: GenerationSettings;
+    thumbnail?: {
+        file: File;
+        preview: string;
+        base64Data: string;
+    };
 }

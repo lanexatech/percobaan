@@ -1,87 +1,58 @@
 
 import React from 'react';
-import { GeneratedVideo } from '../types';
+import type { GeneratedVideo } from '../types';
+import { ButterflySpinner } from './icons/ButterflySpinner';
 import { DownloadIcon } from './icons/DownloadIcon';
 
 interface VideoPreviewProps {
     video: GeneratedVideo | null;
-    isGenerating: boolean;
-    status: string;
-    error: string;
-    videoCount: number;
+    isLoading: boolean;
+    loadingMessage: string;
 }
 
-const GlassPanel: React.FC<{ children: React.ReactNode, className?: string }> = ({ children, className }) => (
-    <div className={`relative w-full aspect-video flex items-center justify-center p-4 rounded-xl border border-white/20 bg-black/30 backdrop-blur-lg overflow-hidden ${className}`}>
-        {children}
-    </div>
-);
-
-
-export const VideoPreview: React.FC<VideoPreviewProps> = ({ video, isGenerating, status, error, videoCount }) => {
+export const VideoPreview: React.FC<VideoPreviewProps> = ({ video, isLoading, loadingMessage }) => {
 
     const handleDownload = () => {
-        if (video) {
-            const a = document.createElement('a');
-            a.href = video.url;
-            a.download = `${video.prompt.substring(0, 20).replace(/\s/g, '_')}_${video.id}.mp4`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-        }
+        if (!video) return;
+        const a = document.createElement('a');
+        a.href = video.url;
+        // Sanitize prompt for filename
+        const fileName = video.prompt.substring(0, 30).replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        a.download = `${fileName || 'generated_video'}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     };
-    
+
+
     return (
-        <div className="relative">
-             <GlassPanel>
-                {isGenerating && (
-                    <div className="text-center z-10">
-                        <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-purple-400 mx-auto mb-4"></div>
-                        <h2 className="text-xl font-semibold mb-2">Generating Your Video</h2>
-                        <p className="text-gray-300">{status}</p>
+        <div className="w-full aspect-video flex flex-col items-center justify-center p-6 bg-gray-900/50 border-2 border-gray-800 rounded-lg shadow-lg">
+            {isLoading && (
+                <div className="text-center">
+                    <ButterflySpinner />
+                    <p className="mt-4 text-lg text-red-400 font-cinzel animate-pulse">{loadingMessage}</p>
+                </div>
+            )}
+            {!isLoading && !video && (
+                <div className="text-center text-gray-500">
+                    <p className="text-2xl font-cinzel">Your masterpiece awaits...</p>
+                    <p className="mt-2">Fill out the form and let's create some magic!</p>
+                </div>
+            )}
+            {!isLoading && video && (
+                <div className="w-full h-full flex flex-col">
+                    <h3 className="text-xl font-bold mb-4 text-center text-red-400 font-cinzel">Generation Complete!</h3>
+                    <div className="flex-grow rounded-lg overflow-hidden">
+                        <video src={video.url} controls autoPlay loop className="w-full h-full object-contain" />
                     </div>
-                )}
-
-                {!isGenerating && error && (
-                     <div className="text-center text-red-400 z-10 p-4">
-                        <h2 className="text-xl font-semibold mb-2">An Error Occurred</h2>
-                        <p>{error}</p>
-                    </div>
-                )}
-
-                {!isGenerating && !error && video && (
-                    <video
-                        key={video.id}
-                        src={video.url}
-                        controls
-                        autoPlay
-                        loop
-                        className="w-full h-full object-contain z-10"
+                    <button 
+                        onClick={handleDownload}
+                        className="mt-4 w-full flex items-center justify-center gap-2 py-2 px-4 font-semibold text-white bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500"
                     >
-                        Your browser does not support the video tag.
-                    </video>
-                )}
-                
-                {!isGenerating && !error && !video && (
-                    <div className="text-center z-10">
-                        <h2 className="text-2xl font-semibold text-gray-400">Your Generated Video Will Appear Here</h2>
-                        <p className="text-gray-500 mt-2">Enter a prompt and click "Generate Video" to start.</p>
-                    </div>
-                )}
-            </GlassPanel>
-            
-            <div className="absolute top-3 left-3 bg-black/50 text-white text-sm px-3 py-1 rounded-full backdrop-blur-sm">
-                Videos Generated: {videoCount}
-            </div>
-
-            {video && !isGenerating && (
-                <button
-                    onClick={handleDownload}
-                    className="absolute top-3 right-3 p-2 bg-black/50 text-white rounded-full backdrop-blur-sm hover:bg-purple-600 transition-colors duration-300"
-                    aria-label="Download video"
-                >
-                   <DownloadIcon />
-                </button>
+                        <DownloadIcon className="w-5 h-5"/>
+                        Download Video
+                    </button>
+                </div>
             )}
         </div>
     );
